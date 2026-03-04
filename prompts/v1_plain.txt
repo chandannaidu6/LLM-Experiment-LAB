@@ -1,0 +1,5 @@
+Answer the following question using only the context provided.
+
+Context: {context}
+Question: {query}
+Answer:

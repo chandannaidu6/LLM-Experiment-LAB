@@ -1,25 +1,26 @@
 class Evaluation:
-    def __init__(self,retrieved_chunks,ground_truth,k):
-        self.retrieved_chunks = retrieved_chunks
-        self.ground_truth = ground_truth
+    def __init__(self,retrieved_ids,source_ids,k,total = None):
+        self.retrieved_ids = list(retrieved_ids)[:k]
+        self.source_ids =  set(source_ids)
         self.k = k
+        self.total = total
 
+    def hit_at_k(self):
+        return len(self.source_ids.intersection(self.retrieved_ids))
+    
     def hit_rate_k(self):
-        for doc in self.retrieved_chunks:
-            if any(doc in gt for gt in self.ground_truth):
-                return True
-            
-        return False
+        return self.hit_at_k()>0
     
     def precision_at_k(self):
-        hits = 0
-        for doc in self.retrieved_chunks:
-            if any(doc in gt for gt in self.ground_truth):
-                hits+=1
-
-        return hits/self.k
-    
+        if self.k == 0:
+            return 0.0
         
+        return self.hit_at_k/self.k
+    
 
-
+    def recall_at_k(self):
+        if not self.source_ids:
+            return 0.0
+        return self.hit_at_k()/len(self.source_ids)
+    
 

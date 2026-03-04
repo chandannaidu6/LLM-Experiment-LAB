@@ -1,35 +1,50 @@
-import torch 
-import faiss
-from transformers import DPRQuestionEncoder, DPRContextEncoder, DPRQuestionEncoderTokenizer, DPRContextEncoderTokenizer
+from typing import List,Dict,Any
+import numpy as np
+from embeddings.openai_embedder import OpenAIEmbedder
 
-class DPR:
-    def __init__(self,query,chunks):
-        self.query = query
+def _cosine_sim(a:np.ndarray,b:np.ndarray)-> np.ndarray:
+    a_norm = a/(np.linalg.norm(a,axis=1,keepdims=True) + 1e-8)
+    b_norm = b/(np.linalg.norm(b,axis=1,keepdims=True) + 1e-8)
+
+    return a_norm @ b_norm.T
+
+
+class DenseRetriever:
+    def __init__(self,chunks:List[Dict[str,Any]], embedder:OpenAIEmbedder | None = None):
         self.chunks = chunks
+        self.embedder = embedder or OpenAIEmbedder()
+        self.embeddings = None
 
-    def dpr_retriever(self):
-        question_encoder = DPRQuestionEncoder.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
-        context_encoder = DPRContextEncoder.from_pretrained("facebook/dpr-ctx_encoder-single-nq-base")
-        question_tokenizer = DPRQuestionEncoderTokenizer.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
-        context_tokenizer = DPRContextEncoderTokenizer.from_pretrained("facebook/dpr-ctx_encoder-single-nq-base")
+    def build_index(self) -> None:
+        texts = [c['text'] for c in self.chunks]
+        self.embeddings = self.embedder.embed_texts(texts)
 
-        inputs = question_tokenizer(self.query,return_tensors="pt")
-        query_embedding = question_encoder(**inputs).pooler_output.detach().numpy()
-        chunk_texts = [c['text'] for c in self.chunks]
-        chunk_embedding = []
-        for chunk in chunk_texts:
-            inputs = context_tokenizer(chunk,return_tensors='pt')
-            embedding = context_encoder(**inputs).pooler_output().numpy()
-            chunk_embedding.append(embedding)
+    def retrieve(self,query:str,top_k:int = 5,) -> List[Dict[str,Any]]:
+        if self.embeddings is None:
+            raise RuntimeError("Call build index before retrieve")
+        
+        q_vec = self.embedder.embed_text(query)
+        q_vec = q_vec.reshape(1,-1)
 
-        chunk_embedding = torch.tensor(chunk_embedding).squeeze().numpy()
-        index = faiss.IndexFlatL2(chunk_embedding.shape[1])
-        index.add(chunk_embedding)
+        sims = _cosine_sim(q_vec,self.embeddings)[0]
+        top_idx = np.argsort(sims)[::-1][:top_k]
+        results:List[Dict[str,Any]] = []
 
-        D,I = index.search(query_embedding,k=5)
+        for idx in top_idx:
+            c = self.chunks[idx]
+            results.append(
+                {
+                    "score": float(sims[idx]),
+                    "text": c["text"],
+                    "doc_name": c.get("doc_name", "Unknown"),
+                    "page_number": c.get("page_number"),
+                    "chunk_id": idx,
 
-        return D,I
+                }
+            )
 
+        return results
+        
 
 
 

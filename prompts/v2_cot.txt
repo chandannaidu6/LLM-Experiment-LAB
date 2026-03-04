@@ -1,0 +1,6 @@
+Answer the following question using only the context provided.
+Think step by step before giving your final answer.
+
+Context: {context}
+Question: {query}
+Let's think step by step:
