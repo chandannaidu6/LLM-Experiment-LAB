@@ -15,7 +15,7 @@ class Evaluation:
         if self.k == 0:
             return 0.0
         
-        return self.hit_at_k/self.k
+        return self.hit_at_k()/self.k
     
 
     def recall_at_k(self):

@@ -1,6 +1,6 @@
 import numpy as np
 from typing import List,Dict,Any,Tuple
-from preprocessing import tokenize_corpus
+from preprocessing import preprocessing
 
 class BM25:
     def __init__(self,query,chunks,vocabulary):
@@ -41,7 +41,8 @@ class BM25:
     
 
     def bm25_retriever(self,k1=1.5,b=0.75,top_k=5):
-        query_tokens = tokenize_corpus([self.query])[0]
+        pre = preprocessing(chunks=[{"text":self.query}],corpus=None)
+        query_tokens = pre.tokenized_corpus()[0]
         query_word_ids = [self.vocabulary[word] for word in query_tokens if word in self.vocabulary]
         if not query_word_ids:
             return []

@@ -1,0 +1,107 @@
+[
+  {
+    "id": "q1",
+    "question": "What is the Probability Ranking Principle (PRP) in information retrieval?",
+    "answer": "The Probability Ranking Principle states that, given the available data, an information retrieval system achieves optimal effectiveness if it orders documents for a query by decreasing probability of relevance.",
+    "source_doc": "foundations_bm25.pdf",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q2",
+    "question": "In the BM25 model, what roles do the parameters k1 and b play?",
+    "answer": "In BM25, k1 controls how quickly term-frequency contributions saturate, while b controls the degree of document-length normalization, with b = 1 meaning full normalization and b = 0 meaning none.",
+    "source_doc": "foundations_bm25.pdf",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q3",
+    "question": "How does BM25 conceptually improve over traditional TF–IDF weighting?",
+    "answer": "BM25 extends TF–IDF by introducing a saturating term-frequency function and explicit document-length normalization, preventing very long or highly repetitive documents from dominating scores.",
+    "source_doc": "foundations_bm25.pdf",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q4",
+    "question": "What is Dense Passage Retrieval (DPR) designed to replace in open-domain QA systems?",
+    "answer": "Dense Passage Retrieval is designed to replace traditional sparse retrievers like TF–IDF and BM25 by using dense vector embeddings and maximum inner product search to find relevant passages.",
+    "source_doc": "Dense-passage-retrieval.pdf",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q5",
+    "question": "How does DPR use in-batch negatives during training?",
+    "answer": "DPR encodes a batch of questions and passages, treats each question's paired passage as the positive, and uses the other passages in the same batch as negatives when optimizing a softmax over similarities.",
+    "source_doc": "Dense-passage-retrieval.pdf",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q6",
+    "question": "What metric does DPR mainly optimize for its retriever, and how is it evaluated in isolation?",
+    "answer": "DPR optimizes a similarity score between question and passage embeddings using a contrastive loss, and is evaluated in isolation by top-k passage retrieval accuracy, i.e., the fraction of questions for which a retrieved passage contains the answer.",
+    "source_doc": "Dense-passage-retrieval.pdf",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q7",
+    "question": "What are the two main components of a Retrieval-Augmented Generation (RAG) model?",
+    "answer": "A RAG model combines a parametric seq2seq generator, such as BART, with a non-parametric memory implemented as a dense vector index of documents accessed by a neural retriever like DPR.",
+    "source_doc": "RAG.pdf",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q8",
+    "question": "What is the difference between the RAG-Sequence and RAG-Token formulations?",
+    "answer": "RAG-Sequence assumes the entire output sequence is generated conditioned on a single retrieved document, while RAG-Token allows each output token to be generated conditioned on potentially different retrieved documents and marginalizes per token.",
+    "source_doc": "RAG.pdf",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q9",
+    "question": "Why do RAG models make it easier to update a system’s world knowledge compared to purely parametric seq2seq models?",
+    "answer": "RAG stores external knowledge in a non-parametric document index, so the system’s knowledge can be updated by rebuilding or swapping the index without retraining the generator’s parameters.",
+    "source_doc": "RAG.pdf",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q10",
+    "question": "What is the core idea of masked language modeling (MLM) in BERT-style models?",
+    "answer": "Masked language modeling randomly selects some tokens in an input sequence, replaces most of them with a special mask token or a random word, and trains the model to predict the original tokens from both left and right context.",
+    "source_doc": "Masked-language-models.pdf",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q11",
+    "question": "How do bidirectional transformer encoders differ from causal (left-to-right) transformers in their attention mask?",
+    "answer": "Bidirectional encoders remove the causal mask and allow each token to attend to all positions in the input sequence, whereas causal transformers mask future positions so each token attends only to itself and tokens to its left.",
+    "source_doc": "Masked-language-models.pdf",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q12",
+    "question": "What is the main motivation for using contextual embeddings instead of a single static vector per word type?",
+    "answer": "Contextual embeddings represent each token with a vector that depends on its surrounding context, allowing different senses and usages of the same word type to be distinguished in downstream tasks.",
+    "source_doc": "Masked-language-models.pdf",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q13",
+    "question": "In the Transformer architecture, what is scaled dot-product attention?",
+    "answer": "Scaled dot-product attention computes attention weights by taking dot products between query and key vectors, scaling by the square root of the key dimension, applying softmax to get weights, and then taking a weighted sum of value vectors.",
+    "source_doc": "Attention.pdf",
+    "difficulty": "easy"
+  },
+  {
+    "id": "q14",
+    "question": "Why does the Transformer scale the dot product of queries and keys by 1/sqrt(d_k)?",
+    "answer": "The scaling factor 1/sqrt(d_k) keeps the magnitude of dot products from growing too large with higher-dimensional keys, preventing the softmax from entering regions with extremely small gradients.",
+    "source_doc": "Attention.pdf",
+    "difficulty": "medium"
+  },
+  {
+    "id": "q15",
+    "question": "What is the main advantage of self-attention over recurrent layers in terms of path length between distant positions?",
+    "answer": "Self-attention connects any pair of positions in a sequence in a constant number of steps, giving a maximum path length of O(1), whereas recurrent layers have a path length that grows linearly with sequence length.",
+    "source_doc": "Attention.pdf",
+    "difficulty": "hard"
+  }
+]

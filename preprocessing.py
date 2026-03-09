@@ -12,6 +12,8 @@ class preprocessing:
         stemmer = PorterStemmer()
 
         for chunk in chunk_texts:
+            if not isinstance(chunk,str):
+                chunk = str(chunk)
             text = chunk.lower()
             for char in string.punctuation:
                 text = text.replace(char,' ')
@@ -22,7 +24,7 @@ class preprocessing:
         return tokenize_corpus
     
 
-    def vocabulary_construction(corpus):
+    def vocabulary_construction(self,corpus):
         vocab = {}
         unique_words = set()
         for word in corpus:
