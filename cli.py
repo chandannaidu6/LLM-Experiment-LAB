@@ -7,11 +7,15 @@ from retrievers.dense import DenseRetriever
 from llm.openai_client import OpenAIClient
 from evaluation.metrics import Evaluation
 from dotenv import load_dotenv
+import os
 
 load_dotenv()
 
 DATA_DIR = Path("Data")
 QUESTIONS_PATH = Path("QA/questions.json")
+
+def normalize_doc_name(name:str)-> str:
+    return os.path.basename(str(name))
 
 def load_chunks():
     chunks  = []
@@ -65,10 +69,11 @@ def rag_answer(query,context_chunks,mode="plain"):
 def eval_doc(qid,results,questions,top_k):
     q = next(q for q in questions if q["id"] == qid)
     gold_doc = q["source_doc"]
-    retrieved_ids = [r["doc_name"] for r in results]
+    retrieved_ids = [normalize_doc_name(r["doc_name"]) for r in results[:top_k]]
     source_ids = [gold_doc]
     ev = Evaluation(retrieved_ids, source_ids, k=min(top_k, len(retrieved_ids)))
     print(f"\nEvaluation for {qid} (gold_doc={gold_doc})")
+    print(f"retrieved_docs@{top_k}: {retrieved_ids}")
     print("  hit@k      :", ev.hit_at_k())
     print("  hit_rate@k :", ev.hit_rate_k())
     print("  precision@k:", ev.precision_at_k())
@@ -94,7 +99,8 @@ def main():
         print(" 3) RAG answer (BM25 + LLM)")
         print(" 4) RAG answer (Dense + LLM)")
         print(" 5) Evaluate BM25 on a question id")
-        print(" 6) Quit")
+        print(" 6) Evaluate Dense on a question id")
+        print(" 7) Quit")
         choice = input("Select option: ").strip()
 
         if choice == "1":
@@ -124,11 +130,26 @@ def main():
                 print("Unknown question id.")
                 continue
             res = bm25_retriever(q["question"], bm25_chunks, vocab, stats, top_k=5)
+            print("Retrieved Chunks")
+            for r in res:
+                print(f"-{r['doc_name']} | chunk_id={r.get('chunk_id')} | score={r['score']}")
             eval_doc(qid, res, questions, top_k=5)
         elif choice == "6":
+            qid = input("Enter question id Dense Retriever(eg:q12): ").strip()
+            q = next((qq for qq in questions if qq["id"] == qid),None)
+            if q is None:
+                print("Unknown question id")
+                continue
+            res = dense_retrieve(q,dense_retriever,top_k=5)
+            for r in res:
+                print(f"- {r['doc_name']} | chunk_id={r.get('chunk_id')} | score = {r['score']}")
+            eval_doc(qid,res,questions,top_k=5)
+
+        elif choice == '7':
             break
+
         else:
-            print("Invalid choice.")
+            print("Invalid Choice")
 
 
 if __name__ == "__main__":
