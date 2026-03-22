@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+chunkers/__init__.py
+chunkers/slide_chunking.py
+evaluation/metrics.py
+llm/openai_client.py
+llm_experiment_lab.egg-info/PKG-INFO
+llm_experiment_lab.egg-info/SOURCES.txt
+llm_experiment_lab.egg-info/dependency_links.txt
+llm_experiment_lab.egg-info/requires.txt
+llm_experiment_lab.egg-info/top_level.txt
+retrievers/bm25.py
+retrievers/dense.py
+tests/test_chunkers.py
+tests/test_metrics.py
+tests/test_retrievers.py

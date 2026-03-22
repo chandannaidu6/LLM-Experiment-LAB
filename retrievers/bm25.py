@@ -1,5 +1,10 @@
 import numpy as np
+import sys
 from typing import List,Dict,Any,Tuple
+from pathlib import Path
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0,str(ROOT))
 from preprocessing import preprocessing
 
 class BM25:
