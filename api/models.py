@@ -11,7 +11,7 @@ class RagRequest(BaseModel):
     prompt_version:str = "v1_plain"
 
 class EvaluateRequest(BaseModel):
-    question_id:int
+    question_id:str
     top_k:int = 5
 
 class RetrievedDocs(BaseModel):
@@ -43,7 +43,7 @@ class EvaluationMetrics(BaseModel):
 
 class EvaluateResponse(BaseModel):
     retriever: Literal["bm25","dense"]
-    question_id:int
+    question_id:str
     gold_doc:str
     retrieved_docs:List[str]
     metrics:EvaluationMetrics

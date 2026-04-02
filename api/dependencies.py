@@ -61,6 +61,7 @@ def build_app_state(app):
     chunks = load_chunks()
     bm25_chunks,vocab,stats = bm25_index(chunks)
     dense_retriever = DenseRetriever(chunks)
+    dense_retriever.build_index()
     questions = load_questions()
 
     app.state.chunks = chunks
@@ -69,7 +70,7 @@ def build_app_state(app):
     app.state.stats = stats
     app.state.dense_retriever = dense_retriever
     app.state.questions = questions
-    app.state.openai_client = OpenAIClient
+    app.state.openai_client = OpenAIClient()
 
 
 def get_app_state(request:Request) -> Any:
