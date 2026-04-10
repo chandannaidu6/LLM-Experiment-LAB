@@ -59,9 +59,9 @@ class SlideChunker:
             chunk_sents = sentences[start_id:end_id]
 
             if len(chunk_sents)<2 and chunks:
-                chunks[-1]['source_sentences'].extend(chunk_sents),
-                chunks[-1]['text'] = " ".join(s['text'] for s in chunks[-1]['source_sentences']),
-                chunks[-1]['sentence_range'] = (chunks[-1]['sentence_range'][0],chunk_sents[-1]['global_idx']),
+                chunks[-1]['source_sentences'].extend(chunk_sents)
+                chunks[-1]['text'] = " ".join(s['text'] for s in chunks[-1]['source_sentences'])
+                chunks[-1]['sentence_range'] = (chunks[-1]['sentence_range'][0],chunk_sents[-1]['global_idx'])
                 chunks[-1]['pages'] = sorted(list(set(chunks[-1]['pages'] + [s['page_number'] for s in chunk_sents])))
                 break
 
