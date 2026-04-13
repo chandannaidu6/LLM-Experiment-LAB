@@ -5,22 +5,32 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "llm-experiment-lab"
 version = "0.1.0"
-description = "RAG experiment lab with PDF chunking, BM25, dense retrievers, and LLM evaluation"
+description = "RAG experiment lab with PDF chunking, BM25, dense retrievers,rerankers and LLM evaluation"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "python-dotenv",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
     "pytest",
     "numpy",
     "scikit-learn",
+    "pymupdf",
+    "chromadb",
+    "sentence-transformers",
+    "openai",
     # add any others you actually use (e.g. openai, rank_bm25, sentence-transformers, etc.)
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
+    "api*",
     "chunkers*",
     "retrievers*",
+    "rerankers*",
+    "storage*",
     "llm*",
     "evaluation*",
     "preprocessing*",
