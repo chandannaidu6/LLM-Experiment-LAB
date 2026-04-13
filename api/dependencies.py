@@ -11,16 +11,15 @@ from preprocessing import preprocessing
 from retrievers.bm25 import BM25
 from retrievers.dense import DenseRetriever
 from llm.openai_client import OpenAIClient
+from reranker.cross_encoder import Reranker
 
 load_dotenv()
 
 DATA_DIR = Path("Data")
 QUESTIONS_PATH = Path("QA/questions.json")
 
-"""
 def normalize_doc_name(name:str)->str:
   return os.path.basename(str(name))
-"""
   
 def load_chunks():
     chunks = []
@@ -63,6 +62,7 @@ def build_app_state(app):
     dense_retriever = DenseRetriever(chunks)
     dense_retriever.build_index()
     questions = load_questions()
+    reranker = Reranker()
 
     app.state.chunks = chunks
     app.state.bm25_chunks = bm25_chunks
@@ -71,6 +71,7 @@ def build_app_state(app):
     app.state.dense_retriever = dense_retriever
     app.state.questions = questions
     app.state.openai_client = OpenAIClient()
+    app.state.reranker = reranker
 
 
 def get_app_state(request:Request) -> Any:
@@ -78,6 +79,9 @@ def get_app_state(request:Request) -> Any:
 
 def get_openai_client(request:Request) -> OpenAIClient:
     return request.app.state.openai_client
+
+def get_reranker(request:Request) -> Reranker:
+    return request.app.state.reranker
 
 
 
