@@ -21,6 +21,7 @@ from retrievers.dense import DenseRetriever
 from reranker.cross_encoder import Reranker
 
 from evaluation.metrics import Evaluation
+import time
 
 router = APIRouter(prefix="/v1",tags=["rag"])
 
@@ -205,125 +206,238 @@ async def retrieve_dense(payload:RetrieveRequest,request:Request):
         results=to_retrieved_docs(results)
     )
 
-@router.post("/rag/bm25",response_model=RagResponse)
-async def rag_bm25(payload:RagRequest,request:Request):
-    results = await run_in_threadpool(
-        bm25_retriever,
-        payload.query,
-        request.app.state.bm25_chunks,
-        request.app.state.vocab,
-        request.app.state.stats,
-        payload.top_k
-    )
-    if getattr(payload,"use_reranker",False):
+@router.post("/rag/bm25", response_model=RagResponse)
+async def rag_bm25(payload: RagRequest, request: Request):
+    tracker = request.app.state.mlflow
+    mode = "cot" if "cot" in payload.prompt_version else "plain"
+
+    with tracker.start_run(run_name=f"rag-bm25-{payload.prompt_version}"):
+        tracker.log_params({
+            "endpoint": "rag/bm25",
+            "retriever": "bm25",
+            "query": payload.query,
+            "top_k": payload.top_k,
+            "prompt_version": payload.prompt_version,
+            "mode": mode,
+            "use_reranker": getattr(payload, "use_reranker", False),
+            "rerank_top_k": getattr(payload, "rerank_top_k", payload.top_k),
+        })
+
+        tracker.log_tags({
+            "pipeline": "rag",
+            "retrieval_type": "sparse",
+        })
+
+        start = time.perf_counter()
+
         results = await run_in_threadpool(
-            request.app.state.reranker.rerank,
+            bm25_retriever,
             payload.query,
-            results,
-            getattr(payload,"rerank_top_k",payload.top_k)
+            request.app.state.bm25_chunks,
+            request.app.state.vocab,
+            request.app.state.stats,
+            payload.top_k
         )
 
-    docs = to_retrieved_docs(results)
-    mode = "cot" if "cot" in payload.prompt_version else "plain"
-    answer = await rag_answer_async(
-        payload.query,
-        request.app.state.openai_client,
-        [d.model_dump() for d in docs],
-        mode=mode,
-    )
+        if getattr(payload, "use_reranker", False):
+            results = await run_in_threadpool(
+                request.app.state.reranker.rerank,
+                payload.query,
+                results,
+                getattr(payload, "rerank_top_k", payload.top_k)
+            )
 
-    return RagResponse(
-        retriever="bm25",
-        question=payload.query,
-        prompt_version=payload.prompt_version,
-        answer=answer,
-        top_k=payload.top_k,
-        retrieved_docs=docs
-    )
+        docs = to_retrieved_docs(results)
 
-@router.post("/rag/dense",response_model=RagResponse)
-async def rag_dense(payload:RagRequest,request:Request):
-    results = await run_in_threadpool(
-        dense_retriever,
-        payload.query,
-        request.app.state.dense_retriever,
-        payload.top_k
-    )
-
-    if getattr(payload,"use_reranker",False):
-        results = await run_in_threadpool(
-            request.app.state.reranker.rerank,
+        answer = await rag_answer_async(
             payload.query,
-            results,
-            getattr(payload,"rerank_top_k",payload.top_k)
+            request.app.state.openai_client,
+            [d.model_dump() for d in docs],
+            mode=mode,
         )
-    docs = to_retrieved_docs(results)
+
+        latency = time.perf_counter() - start
+
+        tracker.log_metrics({
+            "num_retrieved_docs": len(docs),
+            "latency_seconds": latency,
+        })
+
+        return RagResponse(
+            retriever="bm25",
+            question=payload.query,
+            prompt_version=payload.prompt_version,
+            answer=answer,
+            top_k=payload.top_k,
+            retrieved_docs=docs
+        )
+
+
+@router.post("/rag/dense", response_model=RagResponse)
+async def rag_dense(payload: RagRequest, request: Request):
+    tracker = request.app.state.mlflow
     mode = "cot" if "cot" in payload.prompt_version else "plain"
-    answer = await rag_answer_async(
-        payload.query,
-        request.app.state.openai_client,
-        [d.model_dump() for d in docs],
-        mode=mode
-    )
-    return RagResponse(
-        retriever="dense",
-        question=payload.query,
-        prompt_version=payload.prompt_version,
-        answer=answer,
-        top_k=payload.top_k,
-        retrieved_docs=docs
-    )
+
+    with tracker.start_run(run_name=f"rag-dense-{payload.prompt_version}"):
+        tracker.log_params({
+            "endpoint": "rag/dense",
+            "retriever": "dense",
+            "query": payload.query,
+            "top_k": payload.top_k,
+            "prompt_version": payload.prompt_version,
+            "mode": mode,
+            "use_reranker": getattr(payload, "use_reranker", False),
+            "rerank_top_k": getattr(payload, "rerank_top_k", payload.top_k),
+        })
+
+        tracker.log_tags({
+            "pipeline": "rag",
+            "retrieval_type": "dense",
+        })
+
+        start = time.perf_counter()
+
+        results = await run_in_threadpool(
+            dense_retriever,
+            payload.query,
+            request.app.state.dense_retriever,
+            payload.top_k
+        )
+
+        if getattr(payload, "use_reranker", False):
+            results = await run_in_threadpool(
+                request.app.state.reranker.rerank,
+                payload.query,
+                results,
+                getattr(payload, "rerank_top_k", payload.top_k)
+            )
+
+        docs = to_retrieved_docs(results)
+
+        answer = await rag_answer_async(
+            payload.query,
+            request.app.state.openai_client,
+            [d.model_dump() for d in docs],
+            mode=mode
+        )
+
+        latency = time.perf_counter() - start
+
+        tracker.log_metrics({
+            "num_retrieved_docs": len(docs),
+            "latency_seconds": latency,
+        })
+
+        return RagResponse(
+            retriever="dense",
+            question=payload.query,
+            prompt_version=payload.prompt_version,
+            answer=answer,
+            top_k=payload.top_k,
+            retrieved_docs=docs
+        )
 
 @router.post("/evaluation/bm25",response_model=EvaluateResponse)
 async def evaluate_bm25(payload:EvaluateRequest,request:Request):
     q = next((qq for qq in request.app.state.questions if qq['id'] == payload.question_id),None)
     if q is None:
         raise HTTPException(status_code=404,detail="Question Id is not available")
-    results = await run_in_threadpool(
-        bm25_retriever,
-        q['question'],
-        request.app.state.bm25_chunks,
-        request.app.state.vocab,
-        request.app.state.stats,
-        payload.top_k
-    )
-    if getattr(payload,"use_reranker",False):
-        results = await run_in_threadpool(
-            request.app.state.reranker.rerank,
-            q['question'],
-            results,
-            getattr(payload,"rerank_top_k",payload.top_k)
-        )
+    
+    tracker = request.app.state.mlflow
 
-    return build_eval_response("bm25", payload.question_id, results, request.app.state.questions, payload.top_k)
+    with tracker.start_run(run_name=f"evl-bm25-{payload.question_id}"):
+        tracker.log_params({
+            "endpoint":"evaluation/bm25",
+            "retriever":"bm25",
+            "question_id":payload.question_id,
+            "top_k":payload.top_k,
+            "use_reranker":payload.use_reranker,
+            "rerank_top_k":getattr(payload,"rerank_top_k",payload.top_k)
+        })
+        results = await run_in_threadpool(
+            bm25_retriever,
+            q['question'],
+            request.app.state.bm25_chunks,
+            request.app.state.vocab,
+            request.app.state.stats,
+            payload.top_k
+        )
+        if getattr(payload,"use_reranker",False):
+            results = await run_in_threadpool(
+                request.app.state.reranker.rerank,
+                q['question'],
+                results,
+                getattr(payload,"rerank_top_k",payload.top_k)
+            )
+        response = build_eval_response("bm25", payload.question_id, results, request.app.state.questions, payload.top_k)
+
+        tracker.log_metrics({
+            "hit_at_k":response.metrics.hit_at_k,
+            "hit_rate_at_k":float(response.metrics.hit_rate_at_k),
+            "precision_at_k":response.metrics.precision_at_k,
+            "recall_at_k":response.metrics.recall_at_k
+        })
+
+        tracker.log_tags({
+            "retriever":"bm25",
+            "id":q.get("id"),
+            "source_doc":q.get("source_doc")
+        })
+
+        return response
 
 @router.post("/evaluation/dense",response_model=EvaluateResponse)
 async def evaluate_dense(payload:EvaluateRequest,request:Request):
     q = next((qq for qq in request.app.state.questions if qq['id'] == payload.question_id),None)
     if q is None:
         raise HTTPException(status_code=404,detail="question id not available")
-    results = await run_in_threadpool(
-        dense_retriever,
-        q['question'],
-        request.app.state.dense_retriever,
-        payload.top_k
-    )
-    if getattr(payload,"use_reranker",False):
+    
+    
+    tracker = request.app.state.mlflow
+
+    with tracker.start_run(run_name=f"evl-dense-{payload.question_id}"):
+        tracker.log_params({
+            "endpoint":"evaluation/dense",
+            "retriever":"dense",
+            "question_id":payload.question_id,
+            "top_k":payload.top_k,
+            "use_reranker":payload.use_reranker,
+            "rerank_top_k":getattr(payload,"rerank_top_k",payload.top_k)
+        })
         results = await run_in_threadpool(
-            request.app.state.reranker.rerank,
+            dense_retriever,
             q['question'],
-            results,
-            getattr(payload,"rerank_top_k",payload.top_k)
+            request.app.state.dense_retriever,
+            payload.top_k
         )
-    return build_eval_response("dense",payload.question_id,results,request.app.state.questions,payload.top_k)
+        if getattr(payload,"use_reranker",False):
+            results = await run_in_threadpool(
+                request.app.state.reranker.rerank,
+                q['question'],
+                results,
+                getattr(payload,"rerank_top_k",payload.top_k)
+            )
+        response = build_eval_response("dense",payload.question_id,results,request.app.state.questions,payload.top_k)
+        tracker.log_metrics({
+            "hit_at_k":response.metrics.hit_at_k,
+            "hit_rate_at_k":float(response.metrics.hit_rate_at_k),
+            "precision_at_k":response.metrics.precision_at_k,
+            "recall_at_k":response.metrics.recall_at_k})
+        tracker.log_tags({
+            "retriever":"dense",
+            "id":q.get("id"),
+            "source_doc":q.get("source_doc")
+
+        })
+
+        return response
 
 @router.post("/evaluation/bm25/compare",response_model=CompareEvaluateResponse)
 async def compare_evaluate_bm25(payload:EvaluateRequest,request:Request):
     q = next((qq for qq in request.app.state.questions if qq['id'] == payload.question_id),None)
     if q is None:
         raise HTTPException(status_code=404,detail="question id not available")
-
-    return await compare_with_and_without_rerank(
+    response = await compare_with_and_without_rerank(
         retriever_name="bm25",
         question_id=payload.question_id,
         query=q["question"],
@@ -336,14 +450,26 @@ async def compare_evaluate_bm25(payload:EvaluateRequest,request:Request):
         top_k=payload.top_k,
         rerank_top_k=payload.rerank_top_k
     )
+    tracker = request.app.state.mlflow
+    with tracker.start_run(run_name=f"evl-bm25-compare-{payload.question_id}"):
+        tracker.log_metrics({
+            "baseline_hit_at_k":response.baseline.metrics.hit_at_k,
+            "baseline_precision_at_k": response.baseline.metrics.precision_at_k,
+            "baseline_recall_at_k": response.baseline.metrics.recall_at_k,
+            "reranked_hit_at_k": response.reranked.metrics.hit_at_k,
+            "reranked_precision_at_k": response.reranked.metrics.precision_at_k,
+            "reranked_recall_at_k": response.reranked.metrics.recall_at_k,
+            "delta_precision_at_k": response.reranked.metrics.precision_at_k - response.baseline.metrics.precision_at_k,
+            "delta_recall_at_k": response.reranked.metrics.recall_at_k - response.baseline.metrics.recall_at_k,
+        })
+        return response
 
 @router.post("/evaluation/dense/compare",response_model=CompareEvaluateResponse)
 async def compare_evaluate_bm25(payload:EvaluateRequest,request:Request):
     q = next((qq for qq in request.app.state.questions if qq['id'] == payload.question_id),None)
     if q is None:
         raise HTTPException(status_code=404,detail="question id not available")
-
-    return await compare_with_and_without_rerank(
+    response = await compare_with_and_without_rerank(
         retriever_name="dense",
         question_id=payload.question_id,
         query=q["question"],
@@ -353,6 +479,19 @@ async def compare_evaluate_bm25(payload:EvaluateRequest,request:Request):
         top_k=payload.top_k,
         rerank_top_k=payload.rerank_top_k
     )
+    tracker = request.app.state.mlflow
+    with tracker.start_run(run_name=f"evl-dense-compare-{payload.question_id}"):
+        tracker.log_metrics({
+            "baseline_hit_at_k":response.baseline.metrics.hit_at_k,
+            "baseline_precision_at_k": response.baseline.metrics.precision_at_k,
+            "baseline_recall_at_k": response.baseline.metrics.recall_at_k,
+            "reranked_hit_at_k": response.reranked.metrics.hit_at_k,
+            "reranked_precision_at_k": response.reranked.metrics.precision_at_k,
+            "reranked_recall_at_k": response.reranked.metrics.recall_at_k,
+            "delta_precision_at_k": response.reranked.metrics.precision_at_k - response.baseline.metrics.precision_at_k,
+            "delta_recall_at_k": response.reranked.metrics.recall_at_k - response.baseline.metrics.recall_at_k,
+        })
+        return response 
 
 
 

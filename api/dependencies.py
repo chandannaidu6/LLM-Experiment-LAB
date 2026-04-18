@@ -1,5 +1,4 @@
 #Building an app level cache 
-import os
 import json
 from typing import Any
 from fastapi import Request
@@ -12,7 +11,7 @@ from retrievers.bm25 import BM25
 from retrievers.dense import DenseRetriever
 from llm.openai_client import OpenAIClient
 from reranker.cross_encoder import Reranker
-
+from tracking import MLFlow
 load_dotenv()
 
 DATA_DIR = Path("Data")
@@ -63,6 +62,7 @@ def build_app_state(app):
     dense_retriever.build_index()
     questions = load_questions()
     reranker = Reranker()
+    mlflow_tracker = MLFlow()
 
     app.state.chunks = chunks
     app.state.bm25_chunks = bm25_chunks
@@ -72,6 +72,7 @@ def build_app_state(app):
     app.state.questions = questions
     app.state.openai_client = OpenAIClient()
     app.state.reranker = reranker
+    app.state.mlflow = mlflow_tracker
 
 
 def get_app_state(request:Request) -> Any:
@@ -82,6 +83,9 @@ def get_openai_client(request:Request) -> OpenAIClient:
 
 def get_reranker(request:Request) -> Reranker:
     return request.app.state.reranker
+
+def get_mlflow(request:Request) -> MLFlow:
+    return request.app.state.mlflow
 
 
 
