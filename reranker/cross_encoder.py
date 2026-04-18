@@ -7,10 +7,24 @@ class Reranker:
     def rerank(self,query,candidates,top_k:int=5):
         if not candidates:
             return []
-        pairs = [(query,c["text"]) for c in candidates]
+        pairs = []
+        normalized_candidates = []
+
+        for c in candidates:
+            text = c.get("text","")
+            if isinstance(text,list):
+                text = " ".join(str(x) for x in text)
+            elif text is None:
+                text = ""
+            else:
+                text = str(text)
+            item  = dict(c)
+            item["text"] = text
+            normalized_candidates.append(item)
+            pairs.append((str(query),text))
         scores = self.model.predict(pairs)
         reranked = []
-        for candidate,score in zip(candidates,scores):
+        for candidate,score in zip(normalized_candidates,scores):
             item = dict(candidate)
             item["rerank_score"] = float(score)
             reranked.append(item)
