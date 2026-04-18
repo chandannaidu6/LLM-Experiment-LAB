@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+import mlflow
 
 PLAIN_TEMPLATE = Path("prompts/v1_plain.txt").read_text()
 COT_TEMPLATE = Path("prompts/v2_cot.txt").read_text()
@@ -19,6 +20,7 @@ class OpenAIClient:
         template = PLAIN_TEMPLATE if mode == "plain" else COT_TEMPLATE
         return template.format(context=context,query=query)
     
+    @mlflow.trace
     def chat(self,query:str,context:str,mode:Literal["plain","cot"] = "plain") -> str:
         prompt = self.build_prompt(query,context,mode)
         response = self._client.responses.create(model=self.model,input=prompt)
