@@ -1,8 +1,8 @@
 class Evaluation:
     def __init__(self,retrieved_ids,source_ids,k,total = None):
-        self.retrieved_ids = list(retrieved_ids)[:k]
-        self.source_ids =  set(source_ids)
-        self.k = k
+        self.retrieved_ids = [str(x) for x in list(retrieved_ids)[:k]]
+        self.source_ids =  {str(x) for x in source_ids}
+        self.k = min(k,len(retrieved_ids))
         self.total = total
 
     def hit_at_k(self):
@@ -23,4 +23,5 @@ class Evaluation:
             return 0.0
         return self.hit_at_k()/len(self.source_ids)
     
+
 
