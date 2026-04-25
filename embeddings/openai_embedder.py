@@ -1,23 +1,42 @@
-from openai import OpenAI
+from openai import OpenAI,RateLimitError
 import os
 import numpy as np
+import time
 from typing import List
 
 class OpenAIEmbedder:
-    def __init__(self,model:str="text-embedding-3-small",api_key:str | None = None):
+    def __init__(self,model:str="text-embedding-3-small",api_key:str | None = None,batch_size:int = 100):
         self.model = model
         self.client = OpenAI(api_key =api_key or os.getenv("OPENAI_API_KEY"))
+        self.batch_size = batch_size
 
     def embed_texts(self,texts:List[str]) -> np.ndarray:
-        if not texts:
-            return np.zeros((0,0),dtype = np.float32)
-        
-        clean_texts = [str(t) for t in texts]
-        
-        resp = self.client.embeddings.create(model=self.model,input=clean_texts)
+        clean_texts = []
+        for t in texts:
+            if t is None:
+                t = " "
+            elif isinstance(t,list):
+                text = " ".join(str(x) for x in t).strip()
+            else:
+                text = str(t).strip()
+            if not text:
+                text = " "
 
-        vectors = [item.embedding for item in resp.data]
-        return np.array(vectors,dtype=np.float32)
+            clean_texts.append(text)
+        all_embeddings = []
+        
+        for i in range(0,len(clean_texts),self.batch_size):
+            batch = clean_texts[i:i+self.batch_size]
+            while True:
+                try:
+                    resp = self.client.embeddings.create(model=self.model,input=batch)
+                    all_embeddings.extend([d.embedding for d in resp.data])
+                    break
+
+                except RateLimitError as e:
+                    time.sleep(1.0)
+                    continue
+        return np.array(all_embeddings,dtype=np.float32)
     
     def embed_text(self,text:str) -> np.ndarray:
         arr = self.embed_texts([text])
