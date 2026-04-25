@@ -19,7 +19,7 @@ from api.dependencies import normalize_doc_name
 from retrievers.bm25 import BM25
 from retrievers.dense import DenseRetriever
 from reranker.cross_encoder import Reranker
-
+from randomize import Randomize
 from evaluation.metrics import Evaluation
 import time
 
@@ -62,21 +62,34 @@ def to_retrieved_docs(chunks):
 async def rag_answer_async(query,client,chunks,mode="plain"):
     context = "\n\n".join(f"[{i+1}] {c['doc_name']} (chunk {c['chunk_id']}):{c['text']}" for i,c in enumerate(chunks))
     if hasattr(client,"achat"):
-        return client.achat(query,context,mode=mode)
+        return await client.achat(query,context,mode=mode)
     return await run_in_threadpool(client.chat,query,context,mode)
 
-def build_eval_response(retriever,qid,results,questions,top_k):
+def unique_in_order(items):
+    seen = set()
+    out = []
+    for x in items:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+
+    return out
+
+def build_eval_response(retriever,qid,results,questions,qrels,top_k):
     q = next((q for q in questions if q['id'] == qid),None)
     if q is None:
         return HTTPException(status_code=404,detail="Question does not exist")
-    gold_id = normalize_doc_name(q['source_doc'])
-    retrieved_ids = [normalize_doc_name(r['doc_name']) for r in results]
-    source_ids = [gold_id]
-    ev = Evaluation(retrieved_ids,source_ids,k=min(top_k,len(retrieved_ids)))
+    retrieved_ids = unique_in_order([r['doc_name'] for r in results])
+    gold_raw_docs = qrels.get(qid,[])
+    gold_docs = [str(d) for d in gold_raw_docs]
+    ev = Evaluation(retrieved_ids,gold_docs,k=min(top_k,len(retrieved_ids)))
+    primary_gold_doc = gold_docs[0] if gold_docs else None
+    rank = gold_rank(results[:top_k],primary_gold_doc) if primary_gold_doc else None
     return EvaluateResponse(
         retriever=retriever,
         question_id=qid,
-        gold_doc=gold_id,
+        gold_doc=gold_docs[0] if gold_docs else None,
+        gold_rank = rank,
         retrieved_docs=retrieved_ids,
         metrics=EvaluationMetrics(
             hit_at_k=ev.hit_at_k(),
@@ -86,14 +99,27 @@ def build_eval_response(retriever,qid,results,questions,top_k):
         )
     )
 
+def find_gold_chunk(question_id,qrels,chunks):
+    gold_docs = set(str(x) for x in qrels.get(question_id,[]))
+    for c in chunks:
+        if str(c.get("doc_name")) in gold_docs:
+            return c
+    return None
+
+def gold_rank(results,gold_doc):
+    ranked = [str(r["doc_name"]) for r in results]
+    gold_doc = str(gold_doc)
+    return ranked.index(gold_doc)+1 if gold_doc in ranked else None
+
+
 async def compare_with_and_without_rerank(retriever_name:str,question_id:str,query:str,retriever_fn,retriever_args:tuple,request:Request,top_k:int,rerank_top_k:int | None=None):
     q = next((qq for qq in request.app.state.questions if qq["id"] == question_id),None)
     if q is None:
         raise HTTPException(status_code=404, detail="Question id not available")
     
     rerank_top_k = rerank_top_k or top_k
-    gold_doc = normalize_doc_name(q["source_doc"])
-
+    gold_docs_raw = request.app.state.qrels.get(question_id,[])
+    gold_docs = [str(d) for d in gold_docs_raw]
 
     baseline_results = await run_in_threadpool(
         retriever_fn,
@@ -107,23 +133,24 @@ async def compare_with_and_without_rerank(retriever_name:str,question_id:str,que
         baseline_results,
         rerank_top_k or top_k
     )
-    baseline_ids = [normalize_doc_name(r["doc_name"]) for r in baseline_results]
-    reranked_ids = [normalize_doc_name(r["doc_name"]) for r in reranked_results]
+    baseline_ids = unique_in_order([r["doc_name"] for r in baseline_results])
+    reranked_ids = unique_in_order([r["doc_name"] for r in reranked_results])
+
 
     baseline_eval = Evaluation(
         baseline_ids,
-        [gold_doc],
+        gold_docs,
         k = min(top_k,len(baseline_ids))
     )
     reranked_eval = Evaluation(
         reranked_ids,
-        [gold_doc],
+        gold_docs,
         k = min(top_k,len(reranked_ids))
     )
     return CompareEvaluateResponse(
         retriever=retriever_name,
         question_id=question_id,
-        gold_doc=gold_doc,
+        gold_doc=gold_docs,
         top_k=top_k,
         rerank_top_k=rerank_top_k,
         baseline=CompareEvaluationResult(
@@ -369,7 +396,7 @@ async def evaluate_bm25(payload:EvaluateRequest,request:Request):
                 results,
                 getattr(payload,"rerank_top_k",payload.top_k)
             )
-        response = build_eval_response("bm25", payload.question_id, results, request.app.state.questions, payload.top_k)
+        response = build_eval_response("bm25", payload.question_id, results, request.app.state.questions, request.app.state.qrels,payload.top_k)
 
         tracker.log_metrics({
             "hit_at_k":response.metrics.hit_at_k,
@@ -402,22 +429,49 @@ async def evaluate_dense(payload:EvaluateRequest,request:Request):
             "question_id":payload.question_id,
             "top_k":payload.top_k,
             "use_reranker":payload.use_reranker,
-            "rerank_top_k":getattr(payload,"rerank_top_k",payload.top_k)
+            "rerank_top_k":getattr(payload,"rerank_top_k",payload.top_k),
+            "experiment":getattr(payload,"experiment",False),
+            "position":getattr(payload,"position",None),
+            "candidate_pool_size":getattr(payload,"candidate_pool_size",30)
         })
-        results = await run_in_threadpool(
-            dense_retriever,
-            q['question'],
-            request.app.state.dense_retriever,
-            payload.top_k
-        )
-        if getattr(payload,"use_reranker",False):
+        if getattr(payload,"experiment",False):
+            if not getattr(payload,"use_reranker",False):
+                raise HTTPException(status_code=400,detail="experiment=True requires use_reranker=True")
+            gold_chunk = find_gold_chunk(payload.question_id,
+                                         request.app.state.qrels,
+                                         request.app.state.chunks)
+            if gold_chunk is None:
+                raise HTTPException(status_code=404,detail="Gold chunk is not found")
+            candidate_chunks = Randomize.create_positioned_list(
+                gold_chunk=gold_chunk,
+                all_chunks=request.app.state.chunks,
+                position=getattr(payload,"position","middle"),
+                total_docs = getattr(payload,"candidate_pool_size",30)
+            )
             results = await run_in_threadpool(
                 request.app.state.reranker.rerank,
-                q['question'],
-                results,
+                q["question"],
+                candidate_chunks,
                 getattr(payload,"rerank_top_k",payload.top_k)
             )
-        response = build_eval_response("dense",payload.question_id,results,request.app.state.questions,payload.top_k)
+        else:
+            results = await run_in_threadpool(
+                dense_retriever,
+                q['question'],
+                request.app.state.dense_retriever,
+                payload.top_k
+            )
+            if getattr(payload,"use_reranker",False):
+                results = await run_in_threadpool(
+                    request.app.state.reranker.rerank,
+                    q['question'],
+                    results,
+                    getattr(payload,"rerank_top_k",payload.top_k)
+                )
+        print("qid:", payload.question_id)
+        print("gold_docs:", request.app.state.qrels.get(payload.question_id))
+        print("retrieved doc_names:", [r["doc_name"] for r in results])
+        response = build_eval_response("dense",payload.question_id,results,request.app.state.questions,request.app.state.qrels,payload.top_k)
         tracker.log_metrics({
             "hit_at_k":response.metrics.hit_at_k,
             "hit_rate_at_k":float(response.metrics.hit_rate_at_k),

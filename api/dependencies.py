@@ -14,12 +14,16 @@ from reranker.cross_encoder import Reranker
 from tracking import MLFlow
 load_dotenv()
 
-DATA_DIR = Path("Data")
+DATA_DIR = Path("Data/beir_scifact")
 QUESTIONS_PATH = Path("QA/questions.json")
 
 def normalize_doc_name(name:str)->str:
   return os.path.basename(str(name))
-  
+
+def load_json(path:Path):
+    with open(path,"r",encoding="utf-8") as f:
+        return json.load(f)
+"""
 def load_chunks():
     chunks = []
     for pdf_path in DATA_DIR.glob("*.pdf"):
@@ -29,7 +33,7 @@ def load_chunks():
         doc_chunks = ch.chunk_sentences(sentences=sentences)
         chunks.extend(doc_chunks)
     return chunks
-
+"""
 def bm25_index(chunks):
     pre = preprocessing(chunks=chunks,corpus=None)
     tokenized = pre.tokenized_corpus()
@@ -42,7 +46,7 @@ def bm25_index(chunks):
         c['text'] = tokens
         bm_chunks.append(c)
 
-    bm = BM25("dummy",chunks,vocab)
+    bm = BM25("dummy",bm_chunks,vocab)
     stats = bm.IDF()
     return bm_chunks,vocab,stats
 
@@ -56,20 +60,21 @@ def load_questions():
         return json.load(f)
     
 def build_app_state(app):
-    chunks = load_chunks()
+    chunks = load_json(DATA_DIR/"chunks.json")
+    questions = load_json(DATA_DIR/"questions.json")
+    qrels = load_json(DATA_DIR/"qrels.json")
     bm25_chunks,vocab,stats = bm25_index(chunks)
     dense_retriever = DenseRetriever(chunks)
-    dense_retriever.build_index()
-    questions = load_questions()
     reranker = Reranker()
     mlflow_tracker = MLFlow()
 
     app.state.chunks = chunks
+    app.state.questions = questions
+    app.state.qrels = qrels
     app.state.bm25_chunks = bm25_chunks
     app.state.vocab = vocab
     app.state.stats = stats
     app.state.dense_retriever = dense_retriever
-    app.state.questions = questions
     app.state.openai_client = OpenAIClient()
     app.state.reranker = reranker
     app.state.mlflow = mlflow_tracker

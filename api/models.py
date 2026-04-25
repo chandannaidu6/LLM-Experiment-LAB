@@ -19,6 +19,9 @@ class EvaluateRequest(BaseModel):
     top_k:int = 5
     use_reranker:bool = False
     rerank_top_k:int = 5
+    experiment:bool = False
+    position:Optional[Literal["start","middle","end"]] = None
+    candidate_pool_size:Optional[int] = 30
 
 class RetrievedDocs(BaseModel):
     doc_name:str
@@ -51,7 +54,8 @@ class EvaluationMetrics(BaseModel):
 class EvaluateResponse(BaseModel):
     retriever: Literal["bm25","dense"]
     question_id:str
-    gold_doc:str
+    gold_doc:Optional[str] = None
+    gold_rank:Optional[int] = None
     retrieved_docs:List[str]
     metrics:EvaluationMetrics
 
@@ -62,7 +66,7 @@ class CompareEvaluationResult(BaseModel):
 class CompareEvaluateResponse(BaseModel):
     retriever: Literal["bm25","dense"]
     question_id:str
-    gold_doc:str
+    gold_doc:Optional[str] = None
     top_k:int
     rerank_top_k:int
     baseline:CompareEvaluationResult
