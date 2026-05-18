@@ -1,12 +1,21 @@
 from __future__ import annotations
 from typing import List,Dict,Any,Optional
+import os
 
 import chromadb
 
 class ChromaVector:
-    def __init__(self,collection_name:str = "rag_chunks",host:str = "localhost", port:int = 8001):
+    def __init__(self,collection_name:str = "rag_chunks",host:Opional[str] = None, port:Optional[int] = None):
         self.collection_name = collection_name
-        self.client = chromadb.HttpClient(host=host, port= port)
+        resolved_host = host or os.getenv("CHROMA_HOST","localhost")
+        env_port = os.getenv("CHROMA_PORT")
+        if port is not None:
+            resolved_port = port
+        elif env_port is not None:
+            resolved_port = int(env_port)
+        else:
+            resolved_port = 8001
+        self.client = chromadb.HttpClient(host=resolved_host, port= resolved_port)
         self.collection = self.client.get_or_create_collection(name = self.collection_name,
                                                                metadata={"hnsw:space":"cosine"})
         
