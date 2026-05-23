@@ -7,12 +7,19 @@ class RetrieveRequest(BaseModel):
     use_reranker:bool = False
     rerank_top_k:int = 5
 
+class HydeRetrieveRequest(RetrieveRequest):
+    hyde_mode:Literal["short","long"] = "short"
+
 class RagRequest(BaseModel):
     query:str
     top_k:int = 5
     prompt_version:str = "v1_plain"
     use_reranker:bool = False
     rerank_top_k:int = 5
+
+class HydeRagRequest(RagRequest):
+    hyde_mode:Literal["short","long"] = "short"
+    
 
 class EvaluateRequest(BaseModel):
     question_id:str

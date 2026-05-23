@@ -12,6 +12,9 @@ from retrievers.dense import DenseRetriever
 from llm.openai_client import OpenAIClient
 from reranker.cross_encoder import Reranker
 from tracking import MLFlow
+from retrievers.hyde import HydeRetriever
+from embeddings.openai_embedder import OpenAIEmbedder
+from storage.chroma_client import ChromaVector
 load_dotenv()
 
 DATA_DIR = Path("Data/beir_scifact")
@@ -59,12 +62,17 @@ def load_questions():
     with open(QUESTIONS_PATH,'r',encoding='utf-8') as f:
         return json.load(f)
     
+    
 def build_app_state(app):
     chunks = load_json(DATA_DIR/"chunks.json")
     questions = load_json(DATA_DIR/"questions.json")
     qrels = load_json(DATA_DIR/"qrels.json")
     bm25_chunks,vocab,stats = bm25_index(chunks)
+    openai_client = OpenAIClient()
+    embedder = OpenAIEmbedder()
+    vector_store = ChromaVector(collection_name="rag_chunks")
     dense_retriever = DenseRetriever(chunks)
+    hyde_retriever = HydeRetriever(llm_client=openai_client,embedder=embedder,vector_store=vector_store)
     reranker = Reranker()
     mlflow_tracker = MLFlow()
 
@@ -74,8 +82,11 @@ def build_app_state(app):
     app.state.bm25_chunks = bm25_chunks
     app.state.vocab = vocab
     app.state.stats = stats
+    app.state.openai_client = openai_client
+    app.state.embedder = embedder
+    app.state.vector_store = vector_store
     app.state.dense_retriever = dense_retriever
-    app.state.openai_client = OpenAIClient()
+    app.state.hyde_retriever = hyde_retriever
     app.state.reranker = reranker
     app.state.mlflow = mlflow_tracker
 
@@ -91,6 +102,9 @@ def get_reranker(request:Request) -> Reranker:
 
 def get_mlflow(request:Request) -> MLFlow:
     return request.app.state.mlflow
+
+def get_hyde_retriever(request: Request) -> HydeRetriever:
+    return request.app.state.hyde_retriever
 
 
 

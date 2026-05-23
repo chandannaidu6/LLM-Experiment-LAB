@@ -1,11 +1,13 @@
-from fastapi import APIRouter,HTTPException,Request
+from fastapi import APIRouter,HTTPException,Request,Depends
 from starlette.concurrency import run_in_threadpool
 
 from api.models import (
     RetrieveRequest,
+    HydeRetrieveRequest,
     RetrievedResponse,
     RetrievedDocs,
     RagRequest,
+    HydeRagRequest,
     EvaluateRequest,
     RagResponse,
     EvaluationMetrics,
@@ -21,6 +23,8 @@ from retrievers.dense import DenseRetriever
 from reranker.cross_encoder import Reranker
 from randomize import Randomize
 from evaluation.metrics import Evaluation
+from api.dependencies import get_hyde_retriever
+from retrievers.hyde import HydeRetriever
 import time
 
 router = APIRouter(prefix="/v1",tags=["rag"])
@@ -78,7 +82,7 @@ def unique_in_order(items):
 def build_eval_response(retriever,qid,results,questions,qrels,top_k):
     q = next((q for q in questions if q['id'] == qid),None)
     if q is None:
-        return HTTPException(status_code=404,detail="Question does not exist")
+        raise HTTPException(status_code=404,detail="Question does not exist")
     retrieved_ids = unique_in_order([r['doc_name'] for r in results])
     gold_raw_docs = qrels.get(qid,[])
     gold_docs = [str(d) for d in gold_raw_docs]
@@ -233,6 +237,28 @@ async def retrieve_dense(payload:RetrieveRequest,request:Request):
         results=to_retrieved_docs(results)
     )
 
+@router.post("/retrieve/hyde",response_model= RetrievedResponse)
+async def retrieve_hyde(payload:HydeRetrieveRequest,request:Request,hyde:HydeRetriever = Depends(get_hyde_retriever)):
+    results = await run_in_threadpool(
+        hyde.retrieve,
+        payload.query,
+        payload.top_k,
+        payload.hyde_mode
+    )
+    if getattr(payload,"use_reranker",False):
+        results = await run_in_threadpool(
+            request.app.state.reranker.rerank,
+            payload.query,
+            results,
+            getattr(payload,"rerank_top_k",payload.top_k)
+        )
+    return RetrievedResponse(
+        retriever="hyde",
+        query=payload.query,
+        top_k=payload.top_k,
+        results=to_retrieved_docs(results),
+    )
+
 @router.post("/rag/bm25", response_model=RagResponse)
 async def rag_bm25(payload: RagRequest, request: Request):
     tracker = request.app.state.mlflow
@@ -364,6 +390,70 @@ async def rag_dense(payload: RagRequest, request: Request):
             retrieved_docs=docs
         )
 
+@router.post("/rag/hyde", response_model=RagResponse)
+async def rag_dense(payload: RagRequest, request: Request, hyde: HydeRetriever = Depends(get_hyde_retriever)):
+    tracker = request.app.state.mlflow
+    mode = "cot" if "cot" in payload.prompt_version else "plain"
+
+    with tracker.start_run(run_name=f"rag-dense-{payload.prompt_version}"):
+        tracker.log_params({
+            "endpoint": "rag/hyde",
+            "retriever": "hyde",
+            "query": payload.query,
+            "top_k": payload.top_k,
+            "prompt_version": payload.prompt_version,
+            "mode": mode,
+            "use_reranker": getattr(payload, "use_reranker", False),
+            "rerank_top_k": getattr(payload, "rerank_top_k", payload.top_k),
+        })
+
+        tracker.log_tags({
+            "pipeline": "rag",
+            "retrieval_type": "hyde",
+        })
+
+        start = time.perf_counter()
+
+        results = await run_in_threadpool(
+            hyde.retrieve,
+            payload.query,
+            payload.top_k,
+            getattr(payload,"hyde_mode","short")
+        )
+
+        if getattr(payload, "use_reranker", False):
+            results = await run_in_threadpool(
+                request.app.state.reranker.rerank,
+                payload.query,
+                results,
+                getattr(payload, "rerank_top_k", payload.top_k)
+            )
+
+        docs = to_retrieved_docs(results)
+
+        answer = await rag_answer_async(
+            payload.query,
+            request.app.state.openai_client,
+            [d.model_dump() for d in docs],
+            mode=mode
+        )
+
+        latency = time.perf_counter() - start
+
+        tracker.log_metrics({
+            "num_retrieved_docs": len(docs),
+            "latency_seconds": latency,
+        })
+
+        return RagResponse(
+            retriever="hyde",
+            question=payload.query,
+            prompt_version=payload.prompt_version,
+            answer=answer,
+            top_k=payload.top_k,
+            retrieved_docs=docs
+        )
+
 @router.post("/evaluation/bm25",response_model=EvaluateResponse)
 async def evaluate_bm25(payload:EvaluateRequest,request:Request):
     q = next((qq for qq in request.app.state.questions if qq['id'] == payload.question_id),None)
@@ -435,8 +525,6 @@ async def evaluate_dense(payload:EvaluateRequest,request:Request):
             "candidate_pool_size":getattr(payload,"candidate_pool_size",30)
         })
         if getattr(payload,"experiment",False):
-            if not getattr(payload,"use_reranker",False):
-                raise HTTPException(status_code=400,detail="experiment=True requires use_reranker=True")
             gold_chunk = find_gold_chunk(payload.question_id,
                                          request.app.state.qrels,
                                          request.app.state.chunks)
@@ -448,12 +536,21 @@ async def evaluate_dense(payload:EvaluateRequest,request:Request):
                 position=getattr(payload,"position","middle"),
                 total_docs = getattr(payload,"candidate_pool_size",30)
             )
+            print(len(candidate_chunks))
+            print(candidate_chunks[0])
             results = await run_in_threadpool(
-                request.app.state.reranker.rerank,
+                dense_retriever,
                 q["question"],
-                candidate_chunks,
-                getattr(payload,"rerank_top_k",payload.top_k)
+                DenseRetriever(candidate_chunks),
+                payload.top_k
             )
+            if getattr(payload,"use_reranker",False):
+                results  = await run_in_threadpool(
+                    request.app.state.reranker.rerank,
+                    q["question"],
+                    results,
+                    getattr(payload,"rerank_top_k",payload.top_k)
+                )
         else:
             results = await run_in_threadpool(
                 dense_retriever,
@@ -473,6 +570,7 @@ async def evaluate_dense(payload:EvaluateRequest,request:Request):
         print("retrieved doc_names:", [r["doc_name"] for r in results])
         response = build_eval_response("dense",payload.question_id,results,request.app.state.questions,request.app.state.qrels,payload.top_k)
         tracker.log_metrics({
+            "gold_rank":response.gold_rank,
             "hit_at_k":response.metrics.hit_at_k,
             "hit_rate_at_k":float(response.metrics.hit_rate_at_k),
             "precision_at_k":response.metrics.precision_at_k,
