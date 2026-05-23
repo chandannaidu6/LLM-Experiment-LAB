@@ -1,0 +1,5 @@
+Generate a context for the given query keep the length limited to 250 words
+
+query : {query}
+
+Answer:
