@@ -5,6 +5,8 @@ from api.models import (
     RetrieveRequest,
     HydeRetrieveRequest,
     RetrievedResponse,
+    HybridRetrievedDocs,
+    HybridRetrievedResponse,
     RetrievedDocs,
     RagRequest,
     HydeRagRequest,
@@ -20,10 +22,12 @@ from api.models import (
 from api.dependencies import normalize_doc_name
 from retrievers.bm25 import BM25
 from retrievers.dense import DenseRetriever
+from retrievers.hybrid import HybridRetriever
 from reranker.cross_encoder import Reranker
 from randomize import Randomize
 from evaluation.metrics import Evaluation
 from api.dependencies import get_hyde_retriever
+from api.dependencies import get_hybrid_retriever
 from retrievers.hyde import HydeRetriever
 import time
 
@@ -63,11 +67,37 @@ def to_retrieved_docs(chunks):
 
     return results
 
+def retrieved_docs_hybrid(results):
+    output = []
+    for r in results:
+        text = r['text']
+        if isinstance(text,list):
+            text = " ".join(text)
+        pages = r.get("pages")
+        if pages is None:
+            page_number = r.get("page_number")
+            pages = [page_number] if page_number is not None else []
+        output.append(
+            HybridRetrievedDocs(
+                doc_name=r['doc_name'],
+                chunk_id = r.get('chunk_id'),
+                score = float(r['score']),
+                text = text,
+                pages = pages,
+                rerank_score = r.get('rerank_score'),
+                sources = r.get("sources",[]),
+                source_scores = r.get("source_scores",{})
+
+            )
+        )
+    return output
+
 async def rag_answer_async(query,client,chunks,mode="plain"):
     context = "\n\n".join(f"[{i+1}] {c['doc_name']} (chunk {c['chunk_id']}):{c['text']}" for i,c in enumerate(chunks))
     if hasattr(client,"achat"):
         return await client.achat(query,context,mode=mode)
     return await run_in_threadpool(client.chat,query,context,mode)
+
 
 def unique_in_order(items):
     seen = set()
@@ -259,6 +289,28 @@ async def retrieve_hyde(payload:HydeRetrieveRequest,request:Request,hyde:HydeRet
         results=to_retrieved_docs(results),
     )
 
+@router.post("/retrieve/hybrid",response_model=HybridRetrievedResponse)
+async def retrieve_hybrid(payload:RetrieveRequest,request:Request,hybrid:HybridRetriever = Depends(get_hybrid_retriever)):
+    results = await run_in_threadpool(
+        hybrid.retrieve,
+        payload.query,
+        payload.top_k
+    )
+    if getattr(payload,"use_reranker",False):
+        results = await run_in_threadpool(
+            request.app.state.reranker.rerank,
+            payload.query,
+            results,
+            getattr(payload,"rerank_top_k",payload.top_k)
+        )
+    return HybridRetrievedResponse(
+        retriever = "hybrid",
+        query = payload.query,
+        top_k = payload.top_k,
+        results = retrieved_docs_hybrid(results)
+    )
+
+
 @router.post("/rag/bm25", response_model=RagResponse)
 async def rag_bm25(payload: RagRequest, request: Request):
     tracker = request.app.state.mlflow
@@ -391,7 +443,7 @@ async def rag_dense(payload: RagRequest, request: Request):
         )
 
 @router.post("/rag/hyde", response_model=RagResponse)
-async def rag_dense(payload: RagRequest, request: Request, hyde: HydeRetriever = Depends(get_hyde_retriever)):
+async def rag_hyde(payload: RagRequest, request: Request, hyde: HydeRetriever = Depends(get_hyde_retriever)):
     tracker = request.app.state.mlflow
     mode = "cot" if "cot" in payload.prompt_version else "plain"
 
@@ -453,6 +505,70 @@ async def rag_dense(payload: RagRequest, request: Request, hyde: HydeRetriever =
             top_k=payload.top_k,
             retrieved_docs=docs
         )
+
+@router.post("/rag/hybrid",response_model=RagResponse)
+async def rag_hybrid(payload:RagRequest,request:Request,hybrid:HybridRetriever=Depends(get_hybrid_retriever)):
+    tracker = request.app.state.mlflow
+    mode = "cot" if "cot" in payload.prompt_version else "plain"
+
+    with tracker.start_run(run_name=f"rag-dense-{payload.prompt_version}"):
+        tracker.log_params({
+            "endpoint": "rag/hyde",
+            "retriever": "hyde",
+            "query": payload.query,
+            "top_k": payload.top_k,
+            "prompt_version": payload.prompt_version,
+            "mode": mode,
+            "use_reranker": getattr(payload, "use_reranker", False),
+            "rerank_top_k": getattr(payload, "rerank_top_k", payload.top_k),
+        })
+
+        tracker.log_tags({
+            "pipeline": "rag",
+            "retrieval_type": "hyde",
+        })
+
+        start = time.perf_counter()
+
+        results = await run_in_threadpool(
+            hybrid.retrieve,
+            payload.query,
+            payload.top_k,
+        )
+
+        if getattr(payload, "use_reranker", False):
+            results = await run_in_threadpool(
+                request.app.state.reranker.rerank,
+                payload.query,
+                results,
+                getattr(payload, "rerank_top_k", payload.top_k)
+            )
+        docs = retrieved_docs_hybrid(results)
+        answer = await rag_answer_async(
+            payload.query,
+            request.app.state.openai_client,
+            [d.model_dump() for d in docs],
+            mode=mode
+        )
+
+        latency = time.perf_counter() - start
+
+        tracker.log_metrics({
+            "num_retrieved_docs": len(docs),
+            "latency_seconds": latency,
+        })
+
+        return RagResponse(
+            retriever="hybrid",
+            question=payload.query,
+            prompt_version=payload.prompt_version,
+            answer=answer,
+            top_k=payload.top_k,
+            retrieved_docs=docs
+        )
+
+
+
 
 @router.post("/evaluation/bm25",response_model=EvaluateResponse)
 async def evaluate_bm25(payload:EvaluateRequest,request:Request):

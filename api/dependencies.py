@@ -13,6 +13,7 @@ from llm.openai_client import OpenAIClient
 from reranker.cross_encoder import Reranker
 from tracking import MLFlow
 from retrievers.hyde import HydeRetriever
+from retrievers.hybrid import HybridRetriever
 from embeddings.openai_embedder import OpenAIEmbedder
 from storage.chroma_client import ChromaVector
 load_dotenv()
@@ -73,6 +74,7 @@ def build_app_state(app):
     vector_store = ChromaVector(collection_name="rag_chunks")
     dense_retriever = DenseRetriever(chunks)
     hyde_retriever = HydeRetriever(llm_client=openai_client,embedder=embedder,vector_store=vector_store)
+    hybrid_retriever = HybridRetriever(bm25_chunks,vocab,stats,dense_retriever)
     reranker = Reranker()
     mlflow_tracker = MLFlow()
 
@@ -87,6 +89,7 @@ def build_app_state(app):
     app.state.vector_store = vector_store
     app.state.dense_retriever = dense_retriever
     app.state.hyde_retriever = hyde_retriever
+    app.state.hybrid_retriever = hybrid_retriever
     app.state.reranker = reranker
     app.state.mlflow = mlflow_tracker
 
@@ -105,6 +108,9 @@ def get_mlflow(request:Request) -> MLFlow:
 
 def get_hyde_retriever(request: Request) -> HydeRetriever:
     return request.app.state.hyde_retriever
+
+def get_hybrid_retriever(request: Request) -> HybridRetriever:
+    return request.app.state.hybrid_retriever
 
 
 

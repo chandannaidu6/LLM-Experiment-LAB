@@ -1,5 +1,5 @@
 from pydantic import BaseModel,Field
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal,Dict
 
 class RetrieveRequest(BaseModel):
     query: str
@@ -38,14 +38,25 @@ class RetrievedDocs(BaseModel):
     pages:List[int] = Field(default_factory= list)
     rerank_score: Optional[float] = None
 
+class HybridRetrievedDocs(RetrievedDocs):
+    sources: List[str] = Field(default_factory=list)
+    source_scores:Dict[str,Optional[float]] = None 
+
+
 class RetrievedResponse(BaseModel):
-    retriever:Literal["bm25","dense"]
+    retriever:Literal["bm25","dense","hyde"]
     query:str
     top_k:int
     results:List[RetrievedDocs]
 
+class HybridRetrievedResponse(BaseModel):
+    retriever:Literal["hybrid"]
+    query:str
+    top_k:int
+    results:List[HybridRetrievedDocs]
+
 class RagResponse(BaseModel):
-    retriever:Literal["bm25","dense"]
+    retriever:Literal["bm25","dense","hyde","hybrid"]
     question: str
     prompt_version:str
     answer:str
