@@ -1,5 +1,8 @@
-Generate a context for the given query keep the length limited to 250 words
+Write a short hypothetical document that directly answers the query below. 
+The document should be factual in tone, concise, and useful for semantic retrieval. 
+Do not mention that it is hypothetical. Do not add bullet points or commentary. 
+Keep it under 120 words.
 
-query : {query}
+Query: {query}
 
-Answer:
+Document:
