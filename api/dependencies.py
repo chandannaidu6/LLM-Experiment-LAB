@@ -16,6 +16,7 @@ from retrievers.hyde import HydeRetriever
 from retrievers.hybrid import HybridRetriever
 from embeddings.openai_embedder import OpenAIEmbedder
 from storage.chroma_client import ChromaVector
+from cache.redis_semantic_cache import RedisSemanticCache
 load_dotenv()
 
 DATA_DIR = Path("Data/beir_scifact")
@@ -77,6 +78,7 @@ def build_app_state(app):
     hybrid_retriever = HybridRetriever(bm25_chunks,vocab,stats,dense_retriever)
     reranker = Reranker()
     mlflow_tracker = MLFlow()
+    semantic_cache = RedisSemanticCache(embed_fn = lambda text:embedder.embed_texts(text)[0],index_name="idx:rag_semantic_cache_v2",key_prefix="rag:cache:",vector_dim=1536,similarity_threshold= 0.95, ttl_seconds = 86400)
 
     app.state.chunks = chunks
     app.state.questions = questions
@@ -92,6 +94,7 @@ def build_app_state(app):
     app.state.hybrid_retriever = hybrid_retriever
     app.state.reranker = reranker
     app.state.mlflow = mlflow_tracker
+    app.state.semantic_cache = semantic_cache
 
 
 def get_app_state(request:Request) -> Any:
@@ -111,6 +114,12 @@ def get_hyde_retriever(request: Request) -> HydeRetriever:
 
 def get_hybrid_retriever(request: Request) -> HybridRetriever:
     return request.app.state.hybrid_retriever
+
+def get_semantic_cache(request:Request) -> RedisSemanticCache:
+    return request.app.state.semantic_cache
+
+
+
 
 
 

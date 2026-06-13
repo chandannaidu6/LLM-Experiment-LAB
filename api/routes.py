@@ -27,8 +27,10 @@ from reranker.cross_encoder import Reranker
 from randomize import Randomize
 from evaluation.metrics import Evaluation
 from api.dependencies import get_hyde_retriever
-from api.dependencies import get_hybrid_retriever
+from api.dependencies import get_hybrid_retriever,get_semantic_cache
 from retrievers.hyde import HydeRetriever
+from cache.redis_semantic_cache import RedisSemanticCache
+import numpy as np
 import time
 
 router = APIRouter(prefix="/v1",tags=["rag"])
@@ -507,28 +509,60 @@ async def rag_hyde(payload: RagRequest, request: Request, hyde: HydeRetriever = 
         )
 
 @router.post("/rag/hybrid",response_model=RagResponse)
-async def rag_hybrid(payload:RagRequest,request:Request,hybrid:HybridRetriever=Depends(get_hybrid_retriever)):
+async def rag_hybrid(payload:RagRequest,request:Request,hybrid:HybridRetriever=Depends(get_hybrid_retriever),cache:RedisSemanticCache = Depends(get_semantic_cache)):
     tracker = request.app.state.mlflow
     mode = "cot" if "cot" in payload.prompt_version else "plain"
+    total_start = time.perf_counter()
+    cached = cache.lookup(payload.query) if cache is not None else None
+    if cached is not None:
+        hit_latency = time.perf_counter() - total_start
+        with tracker.start_run(run_name=f"rag-hybrid-{payload.prompt_version}-cache-hit"):
+            tracker.log_params({
+            "endpoint": "rag/hybrid",
+            "retriever": "hybrid",
+            "query": payload.query,
+            "top_k": payload.top_k,
+            "prompt_version": payload.prompt_version,
+            "mode": mode,
+            "cache_hit":True,
+            "cache_similarity":cached["similarity"],
+            "use_reranker": getattr(payload, "use_reranker", False),
+            "rerank_top_k": getattr(payload, "rerank_top_k", payload.top_k),
+            })
 
-    with tracker.start_run(run_name=f"rag-dense-{payload.prompt_version}"):
+            tracker.log_metrics({
+            "num_retrieved_docs":0,
+            "latency_seconds": hit_latency,
+            })
+        return RagResponse(
+            retriever="hybrid",
+            question=payload.query,
+            prompt_version=payload.prompt_version,
+            answer=cached["answer"],
+            top_k=payload.top_k,
+            retrieved_docs=[]
+        )
+
+
+
+    with tracker.start_run(run_name=f"rag-hybrid-{payload.prompt_version}"):
         tracker.log_params({
-            "endpoint": "rag/hyde",
-            "retriever": "hyde",
+            "endpoint": "rag/hybrid",
+            "retriever": "hybrid",
             "query": payload.query,
             "top_k": payload.top_k,
             "prompt_version": payload.prompt_version,
             "mode": mode,
             "use_reranker": getattr(payload, "use_reranker", False),
             "rerank_top_k": getattr(payload, "rerank_top_k", payload.top_k),
+            "cache_hit":False
         })
 
         tracker.log_tags({
             "pipeline": "rag",
-            "retrieval_type": "hyde",
+            "retrieval_type": "hybrid",
         })
 
-        start = time.perf_counter()
 
         results = await run_in_threadpool(
             hybrid.retrieve,
@@ -551,12 +585,25 @@ async def rag_hybrid(payload:RagRequest,request:Request,hybrid:HybridRetriever=D
             mode=mode
         )
 
-        latency = time.perf_counter() - start
+        latency = time.perf_counter() - total_start
 
         tracker.log_metrics({
             "num_retrieved_docs": len(docs),
             "latency_seconds": latency,
         })
+        if cache is not None:
+            cache.store(
+                query = payload.query,
+                answer = answer,
+                metadata = {
+                    "retriever":"hybrid",
+                    "top_k":payload.top_k,
+                    "prompt_version":payload.prompt_version,
+                    "doc_names":[d.doc_name for d in docs]
+                }
+
+            )
+
 
         return RagResponse(
             retriever="hybrid",
