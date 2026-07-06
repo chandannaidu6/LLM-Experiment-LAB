@@ -37,6 +37,11 @@ class OpenAIEmbedder:
                     time.sleep(1.0)
                     continue
         return np.array(all_embeddings,dtype=np.float32)
+
+    def embed_sentences(self,sentences:List[str])->np.ndarray:
+        if not sentences:
+            return np.empty((0,0),dtype=np.float32)
+        return self.embed_texts(sentences)
     
     def embed_text(self,text:str) -> np.ndarray:
         arr = self.embed_texts([text])
